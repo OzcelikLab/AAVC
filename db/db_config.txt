@@ -1,1 +1,0 @@
-postgresql://mark_antony:caesar@localhost:5432/aavc
