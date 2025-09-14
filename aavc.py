@@ -1,6 +1,8 @@
 from datetime import datetime
 from psycopg2.extensions import register_adapter, AsIs
 from sqlalchemy import create_engine, text, pool
+from typing import Any, Dict, Optional, Union, Tuple, List
+import argparse
 import json
 import numpy
 import os
@@ -12,47 +14,54 @@ import subprocess
 import time
 import traceback
 import urllib3
-import argparse
 
-
+# suppress pandas warnings about chained assignment operations and urllib3
 pd.options.mode.chained_assignment = None
-#pd.set_option('future.no_silent_downcasting', True)
 pd.set_option('mode.sim_interactive', True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-# db_url = 'postgresql://postgres:arda@localhost:5432/aavc'
-db_url = 'postgresql://mark_antony:140183@localhost:5432/aavc'
+# database connection string for PostgreSQL
+db_url = 'postgresql://aavc_user:aavc_pass@localhost:5432/aavc'
 
+# open a connection to the database
 engine = create_engine(db_url, pool_size=200, max_overflow=0)
 connection = engine.connect()
 
-
-# this was adapted from StackExchange, fixes a ridiculous problem with SQL
-def addapt_numpy_float64(numpy_float64):
-    return AsIs(numpy_float64)
-
-
-def addapt_numpy_int64(numpy_int64):
-    return AsIs(numpy_int64)
-
-register_adapter(numpy.float64, addapt_numpy_float64)
-register_adapter(numpy.int64, addapt_numpy_int64)
+# fix issues with inserting NumPy data into PostgreSQL
+register_adapter(numpy.float64, lambda x: AsIs(x))
+register_adapter(numpy.int64, lambda x: AsIs(x))
 
 class Query:
+    """
+    Class to process genetic variant queries, normalize input,
+    and fetch annotations from VEP and gnomAD.
+    """
 
-    def __init__(self, variants: list, predictor, input_type=None, debug=False, cache=False):
+    def __init__(self,
+                 variants: List[str],
+                 predictor: Any,
+                 input_type: Optional[str] = None,
+                 debug: bool = False,
+                 cache: bool = False) -> None:
+        """
+        Initialize a Query object.
 
+        Args:
+            variants (List[str]): A list of variant strings (e.g., "c.123A>T").
+            predictor (Any): Model or function to predict variant effects.
+            input_type (Optional[str], optional): Input format type (e.g., "nt", "aa"). Defaults to None.
+            debug (bool, optional): Enable debug mode. Defaults to False.
+            cache (bool, optional): Enable caching of results. Defaults to False.
+        """
         self.debug = debug
         self.cache = cache
         self.predictor = predictor
         self.variants = variants
-        self.input_type = input_type
-        if self.input_type is None:
-            self.input_type = self.infer_input_type()
-        self.normalize_input_string()
+        self.input_type = input_type or self.infer_input_type()
 
-        self.eff_data = self.VEP()
-        self.freq_data = self.gnomAD()
+        self.normalize_input_string()
+        self.eff_data: Dict[str, Any] = self.VEP()
+        self.freq_data: Dict[str, Any] = self.gnomAD()
 
     def infer_input_type(self):
 
@@ -451,144 +460,113 @@ class Query:
 
 
 class Variant:
-    def __init__(self, var_id, eff_data, freq_data, predictor):
+    """
+    Class representing a single genetic variant with effect, frequency,
+    transcript, and disease-specific annotations.
+    """
 
-        # define query variables
-        self.var_id = var_id
-        self.eff_data = eff_data
-        self.freq_data = freq_data
-        self.predictor = predictor
-        # self.MOI = MOI
+    def __init__(self,
+                 var_id: str,
+                 eff_data: Dict[str, Any],
+                 freq_data: Dict[str, Any],
+                 predictor: Any) -> None:
+        """
+        Initialize a Variant object.
 
-        # define basic variant info
+        Args:
+            var_id (str): Variant identifier in the format "chr-pos-ref-alt".
+            eff_data (Dict[str, Any]): Variant effect annotation (e.g., VEP output).
+            freq_data (Dict[str, Any]): Variant frequency information (e.g., gnomAD).
+            predictor (Any): Predictor object or model for functional effect.
+        """
+        # query variables
+        self.var_id: str = var_id
+        self.eff_data: Dict[str, Any] = eff_data
+        self.freq_data: Dict[str, Any] = freq_data
+        self.predictor: Any = predictor
+
+        # basic variant info
         split = var_id.split("-")
-        self.chr = split[0]
-        self.pos = int(split[1])
-        self.ref = split[2]
-        self.alt = split[3]
+        self.chr: str = split[0]
+        self.pos: int = int(split[1])
+        self.ref: str = split[2]
+        self.alt: str = split[3]
+        self.end_pos: int = self.pos + len(self.ref) - 1 if len(self.ref) > 1 else self.pos
 
-        if len(self.ref) > 1:
-            self.end_pos = self.pos + len(self.ref) - 1
-        else:
-            self.end_pos = self.pos
+        # genomic context
+        self.gene: str = eff_data["gene"]
+        self.gene_id: str = eff_data["gene_id"]
+        self.tcpt_id: str = eff_data["tcpt_id"]
+        self.strand: str = eff_data["strand"]
+        self.nt_change: Optional[str] = eff_data.get("nt_change")
 
-        # define genomic context
-        self.gene = self.eff_data["gene"]
-        self.gene_id = self.eff_data["gene_id"]
-        self.tcpt_id = self.eff_data["tcpt_id"]
-        self.strand = self.eff_data["strand"]
-        self.nt_change = self.eff_data["nt_change"]
+        # nucleotide position in transcript
+        self.nt_pos: Optional[int] = None
+        if self.nt_change and not ("+" in self.nt_change or "-" in self.nt_change):
+            self.nt_pos = int(re.search(r'\d+', self.nt_change).group())
 
-        # define nucleotide position in tcpt
-        if self.nt_change:
-            if "+" in self.nt_change or "-" in self.nt_change:
-                self.nt_pos = None
-            else:
-                self.nt_pos = int(re.search(r'\d+', self.nt_change).group())
-        else:
-            self.nt_pos = None
+        # effect info
+        self.aa_change: Optional[str] = eff_data.get("aa_change")
+        self.aa_pos: Optional[int] = eff_data.get("aa_pos")
+        self.REVEL: Optional[float] = eff_data.get("revel")
+        self.BayesDel: Optional[float] = eff_data.get("bayesdel")
+        self.spliceAI: Optional[float] = eff_data.get("spliceAI")
+        self.phyloP100way: Optional[float] = eff_data.get("phyloP100way")
+        self.major_conseq: str = eff_data.get("major_conseq", "")
+        self.all_conseqs: List[str] = eff_data.get("all_conseqs", [])
+        self.domain: Optional[str] = self.check_domains()
 
-        # define other effect info
-        self.aa_change = self.eff_data["aa_change"]
-        self.aa_pos = self.eff_data["aa_pos"]
-        self.REVEL = self.eff_data["revel"]
-        self.BayesDel = self.eff_data["bayesdel"]
-        self.spliceAI = self.eff_data["spliceAI"]
-        self.phyloP100way = self.eff_data["phyloP100way"]
-        self.major_conseq = self.eff_data["major_conseq"]
-        self.all_conseqs = self.eff_data["all_conseqs"]
-        self.domain = self.check_domains()
+        # frequency info
+        self.filt_af: float = freq_data.get("popmax", 0)
+        self.hom_ac: int = freq_data.get("total_hom_ac", 0)
 
-        # define frequency info
-        self.filt_af = self.freq_data["popmax"]
-        self.hom_ac = self.freq_data["total_hom_ac"]
+        # gene-specific metrics
+        (self.pLI, self.LOEUF, self.mis_z, self.HI_score, self.mis_perc,
+         self.lof_perc, self.BS1_cutoff, self.BS2_cutoff) = self.get_gene_metrics()
 
-        # retrieve gene-specific annotation
-        self.pLI, self.LOEUF, self.mis_z, self.HI_score, self.mis_perc, self.lof_perc, self.BS1_cutoff, self.BS2_cutoff = self.get_gene_metrics()
+        # disease associations
         self.LOF_assoc, self.MOI = self.get_disease_assoc()
-        self.is_in_LOF_gene = self.is_in_LOF_gene()
+        self.is_in_LOF_gene: bool = self.is_in_LOF_gene()
 
-        #print(self.is_in_LOF_gene)
-
-        # calculate tcpt length and strand
+        # transcript info
         tcpt = self.fetch_tcpt()
-        self.prot_length = tcpt["prot_length"]
-        self.is_canonical = tcpt["is_canonical"]
-        self.alt_start = tcpt["alt_start"]
-        self.alt_stop = tcpt["alt_stop"]
-        self.tln_start = tcpt["tln_start"]
+        self.prot_length: int = tcpt["prot_length"]
+        self.is_canonical: bool = tcpt["is_canonical"]
+        self.alt_start: int = tcpt["alt_start"]
+        self.alt_stop: int = tcpt["alt_stop"]
+        self.tln_start: int = tcpt["tln_start"]
 
-        # check if splice variant
-        self.is_splicing = False
-        if "splic" in self.major_conseq:
-            self.is_splicing = True
-        elif isinstance(self.all_conseqs, list):
-            for conseq in self.all_conseqs:
-                if "splic" in conseq:
-                    self.is_splicing = True
-                    break
+        # splicing
+        self.is_splicing: bool = "splic" in self.major_conseq or any("splic" in c for c in self.all_conseqs)
+        self.splice_type: Optional[str] = None
 
-        '''
-        if self.is_splicing:
-            self.DS_AG = self.eff_data["sAI"]["DS_AG"]
-            self.DS_AL = self.eff_data["sAI"]["DS_AL"]
-            self.DS_DG = self.eff_data["sAI"]["DS_DG"]
-            self.DS_DL = self.eff_data["sAI"]["DS_DL"]
-
-            self.DP_AG = self.eff_data["sAI"]["DP_AG"]
-            self.DP_AL = self.eff_data["sAI"]["DP_AL"]
-            self.DP_DG = self.eff_data["sAI"]["DP_DG"]
-            self.DP_DL = self.eff_data["sAI"]["DP_DL"]
-        else:
-            self.DS_AG = None
-            self.DS_AL = None
-            self.DS_DG = None
-            self.DS_DL = None
-
-            self.DP_AG = None
-            self.DP_AL = None
-            self.DP_DG = None
-            self.DP_DL = None
-        '''
-
-        # define tcpt and exon positions
-        self.splice_type = None
-        self.exon = self.find_exon()
-
-        if isinstance(self.exon, pd.DataFrame) and self.exon.shape[0] > 0:  # check if a match exists and not empty
+        # exon positions
+        self.exon: Union[pd.DataFrame, None] = self.find_exon()
+        if isinstance(self.exon, pd.DataFrame) and not self.exon.empty:
             self.tcpt_start = self.exon["tcpt_start"].squeeze()
             self.tcpt_end = self.exon["tcpt_end"].squeeze()
             self.exon_start = self.exon["exon_start"].squeeze()
             self.exon_end = self.exon["exon_end"].squeeze()
             self.coding_end = self.exon["coding_end"].squeeze()
-            self.highest_freq = self.exon["highest_freq"].squeeze()
-            if not isinstance(self.highest_freq, float):
-                self.highest_freq = 0
+            self.highest_freq = float(self.exon["highest_freq"].squeeze() or 0)
         else:
-            self.tcpt_start = None
-            self.tcpt_end = None
-            self.exon_start = None
-            self.exon_end = None
-            self.coding_end = None
+            self.tcpt_start = self.tcpt_end = self.exon_start = self.exon_end = self.coding_end = None
             self.highest_freq = 0
 
-        # predict NMD
-        if not self.is_at_canonical_splice_site():
-            self.undergoes_NMD = self.check_NMD()
-        else:
-            self.undergoes_NMD = False
+        # NMD prediction
+        self.undergoes_NMD: bool = False if self.is_at_canonical_splice_site() else self.check_NMD()
 
-        # get clinvar-based info
-        self.is_denovo = 0
-        self.is_intrans = 0
-        self.clinvar = self.check_clinvar_status()
+        # ClinVar info
+        self.is_denovo: int = 0
+        self.is_intrans: int = 0
+        self.clinvar: Any = self.check_clinvar_status()
 
-        # set classification variables
-        self.ACMG_criteria = None
-        self.ACMG_classification = None
-        self.ACMG_score = None
-        self.ACMG_flags = None
-        self.post_prob = 0
+        # ACMG classification placeholders
+        self.ACMG_criteria: Optional[Dict[str, Any]] = None
+        self.ACMG_classification: Optional[str] = None
+        self.ACMG_score: Optional[float] = None
+        self.ACMG_flags: Optional[List[str]] = None
+        self.post_prob: float = 0.0
 
     def fetch_tcpt(self):
 
@@ -915,20 +893,6 @@ class Variant:
             else:
                 return False
 
-    def is_blacklisted(self):
-
-        if self.strand == 1:
-            q_bl = text(''' SELECT * FROM blacklist WHERE chr = :chr AND :pos BETWEEN "start_pos" AND "end_pos"  ''')
-        else:
-            q_bl = text(''' SELECT * FROM blacklist WHERE chr = :chr AND :pos BETWEEN "end_pos" AND "start_pos"  ''')
-
-        blackrow = pd.read_sql_query(q_bl, connection, params={"pos": self.pos, "chr": self.chr})
-
-        if len(blackrow) > 0:
-            return True
-        else:
-            return False
-
     def check_NMD(self, splice_trunc_start=None):
 
         can_undergo_NMD = False
@@ -1041,48 +1005,6 @@ class Variant:
                 return domains
             else:
                 return None
-
-    def get_pext(self):
-
-        '''
-        if self.is_splicing:
-
-            if self.strand == 1:
-
-                q = text(" SELECT * FROM pext WHERE ensg_id = :gene_id AND chr = :chromosome AND
-                            :nt_pos BETWEEN start_pos - 3 AND end_pos + 3 ")
-
-            else:
-
-                q = text("SELECT * FROM pext WHERE ensg_id = :gene_id AND chr = :chromosome AND
-                            :nt_pos BETWEEN start_pos + 3 AND end_pos - 3 ")
-
-            r = pd.read_sql_query(q, connection,
-                                  params={"gene_id": self.gene_id, "chromosome": self.chr, "nt_pos": self.pos})
-            print(r)
-            if len(r) > 0:
-                return r["mean_pext"].squeeze()
-            else:
-
-                return None
-
-        else:
-        '''
-
-        if self.strand == 1:
-            q = text(
-                '''SELECT * FROM pext WHERE ensg_id = :gene_id AND chr = :chromosome AND :nt_pos BETWEEN start_pos AND end_pos''')
-        else:
-            q = text(
-                '''SELECT * FROM pext WHERE ensg_id = :gene_id AND chr = :chromosome AND :nt_pos BETWEEN end_pos AND start_pos''')
-
-        r = pd.read_sql_query(q, connection,
-                              params={"gene_id": self.gene_id, "chromosome": self.chr, "nt_pos": self.pos})
-        if len(r) > 0:
-            return r["mean_pext"].squeeze()
-
-        else:
-            return None
 
     def check_homopolymer(self):
 
@@ -1269,41 +1191,6 @@ class Variant:
 
     def get_missplicing(self):
 
-        '''
-        splice_pos = None
-
-        if self.variant.splice_type == "acceptor":
-            if self.variant.strand == 1:
-                splice_pos = self.variant.exon_start - 2
-            else:
-                splice_pos = self.variant.exon_start + 2
-
-        elif self.variant.splice_type == "donor":
-            if self.variant.strand == 1:
-                splice_pos = self.variant.exon_end + 2
-            else:
-                splice_pos = self.variant.exon_end - 2
-
-        q = text(" SELECT * FROM vault WHERE chr = :chr AND splice_site_pos = :splice_pos ")
-        r = pd.read_sql_query(q, connection, params={"chr": self.chr, "splice_pos": splice_pos})
-
-        if len(r) > 0:
-
-            is_frameshifting = r["missplicing_inframe"].squeeze() ^ 1
-
-            if is_frameshifting:
-                undergoes_NMD = self.check_NMD(NONONO)
-            else:
-                undergoes_NMD = False
-
-        else:
-
-            is_frameshifting = False
-            undergoes_NMD = False
-
-        return [is_frameshifting, undergoes_NMD, trunc_start]
-        '''
-
         if self.is_canonical:
 
             q = text(
@@ -1387,28 +1274,39 @@ class Variant:
 
 
 class ACMG:
+    """
+    Class for ACMG variant classification.
+    Stores criteria evaluation, descriptions, flags, and final classification.
+    """
 
-    def __init__(self, variant: Variant, predictor):
+    def __init__(self, variant: "Variant", predictor: Any) -> None:
+        """
+        Initialize ACMG classification object for a given variant.
 
-        self.variant = variant
+        Args:
+            variant (Variant): A Variant object containing effect and frequency data.
+            predictor (Any): Predictor or model used to evaluate ACMG criteria.
+        """
+        self.variant: "Variant" = variant
+        self.predictor: Any = predictor
 
-        self.predictor = predictor
+        # ACMG criteria: PVS, PS, PM, PP, BA, BS, BP
+        self.criteria: Dict[str, Optional[str]] = {k: None for k in [
+            "PVS1", "PS1", "PS2", "PS3", "PS4",
+            "PM1", "PM2", "PM3", "PM4", "PM5", "PM6",
+            "PP1", "PP2", "PP3", "PP4", "PP5",
+            "BA1", "BS1", "BS2", "BS3", "BS4",
+            "BP1", "BP2", "BP3", "BP4", "BP5", "BP6", "BP7"
+        ]}
 
-        self.criteria = {"PVS1": None, "PS1": None, "PS2": None, "PS3": None, "PS4": None,
-                         "PM1": None, "PM2": None, "PM3": None, "PM4": None, "PM5": None, "PM6": None,
-                         "PP1": None, "PP2": None, "PP3": None, "PP4": None, "PP5": None,
-                         "BA1": None, "BS1": None, "BS2": None, "BS3": None, "BS4": None,
-                         "BP1": None, "BP2": None, "BP3": None, "BP4": None, "BP5": None, "BP6": None, "BP7": None}
+        # Optional descriptive info for each criterion
+        self.crit_desc: Dict[str, Optional[str]] = {k: None for k in self.criteria.keys()}
 
-        self.crit_desc = {"PVS1": None, "PS1": None, "PS2": None, "PS3": None, "PS4": None,
-                          "PM1": None, "PM2": None, "PM3": None, "PM4": None, "PM5": None, "PM6": None,
-                          "PP1": None, "PP2": None, "PP3": None, "PP4": None, "PP5": None,
-                          "BA1": None, "BS1": None, "BS2": None, "BS3": None, "BS4": None,
-                          "BP1": None, "BP2": None, "BP3": None, "BP4": None, "BP5": None, "BP6": None, "BP7": None}
+        # Any flags or notes about classification
+        self.flags: List[str] = []
 
-        self.flags = []
-
-        self.classification = None
+        # Final ACMG classification (Pathogenic, Likely Pathogenic, VUS, etc.)
+        self.classification: Optional[str] = None
 
 
     def calc_ACMG_class(self):
@@ -2059,7 +1957,7 @@ class ACMG:
 
                                 perc_lost = 1 - (closest_aa / self.variant.prot_length)
 
-                                
+
 
                                 if perc_lost >= 0.1:
                                     self.criteria["PVS1"] = "PVS1_S"
@@ -2152,9 +2050,9 @@ class ACMG:
 
             if annotated_splicing[0] is not None:
                 spl_csq, is_frameshifting, undergoes_NMD, perc_lost, trunc_start, trunc_end, exons_skipped = annotated_splicing
-		
+
                 #print(f"percentage lost: {round(perc_lost,2)*100}%")
-		
+
                 if is_frameshifting is True:
 
                     if spl_csq == "STOPGAINED":
@@ -2426,27 +2324,45 @@ class ACMG:
 
 
 class AAVC:
+    """
+    Automated ACMG-based Variant Classifier (AAVC) main class.
+    Manages variant input, processing, and output generation.
+    """
 
-    def __init__(self, variants: list = None, mode="default", clock=False, debug=False, cache=False,
-                 prioritization="canonical", predictor="bayesdel", deactivate_PM2=False):
+    def __init__(self,
+                 variants: Optional[List[str]] = None,
+                 mode: str = "default",
+                 clock: bool = False,
+                 debug: bool = False,
+                 cache: bool = False,
+                 prioritization: str = "canonical",
+                 predictor: str = "bayesdel",
+                 deactivate_PM2: bool = False) -> None:
+        """
+        Initialize AAVC object.
 
-        if variants:
-            self.variants = variants
-        else:
-            self.variants = []
-        self.output = {}
-        self.var_objects = []
-        self.mode = mode
-        self.debug = debug
-        self.cache = cache
-        self.clock = clock
-        self.prioritization = prioritization
-        self.predictor = predictor
-        if debug:
-            self.clock = True
-        self.deactivate_PM2 = deactivate_PM2
-        self.raised_exception = False
-        self.exception_statement = ""
+        Args:
+            variants (Optional[List[str]], optional): List of variant strings. Defaults to None.
+            mode (str, optional): Processing mode. Defaults to "default".
+            clock (bool, optional): Enable runtime tracking. Defaults to False.
+            debug (bool, optional): Enable debug mode. Defaults to False.
+            cache (bool, optional): Enable caching of intermediate results. Defaults to False.
+            prioritization (str, optional): Variant prioritization strategy. Defaults to "canonical".
+            predictor (str, optional): Predictor type (e.g., "bayesdel"). Defaults to "bayesdel".
+            deactivate_PM2 (bool, optional): Option to deactivate PM2 ACMG criterion. Defaults to False.
+        """
+        self.variants: List[str] = variants if variants else []
+        self.output: Dict[str, Any] = {}
+        self.var_objects: List[Any] = []
+        self.mode: str = mode
+        self.debug: bool = debug
+        self.cache: bool = cache
+        self.clock: bool = clock or debug  # runtime clock enabled if debug
+        self.prioritization: str = prioritization
+        self.predictor: str = predictor
+        self.deactivate_PM2: bool = deactivate_PM2
+        self.raised_exception: bool = False
+        self.exception_statement: str = ""
 
     def process(self, variant):
 
@@ -2720,22 +2636,38 @@ class AAVC:
         return line_count
 
 
+# uncomment below to run AAVC in Python interpreter
+
 '''
-#variant_list = pd.read_csv("var.txt", sep="\t", header=None)[0].tolist()
+# example variant list
+variant_list = pd.read_csv("var.txt", sep="\t", header=None)[0].tolist()
+
+# or run a single variant
 variant_list = ["3-10142140-A-G"]
 
+# create AAVC instance
 run = AAVC(variant_list, clock=True, debug=True, predictor="bayesdel")
+
+# run the classifier
 run.run()
+'''
 
 if __name__ == "__main__":
-
-    check_db = subprocess.run(['systemctl', 'status', 'postgresql@16-main'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                              text=True)
+    # check PostgreSQL status
+    check_db: subprocess.CompletedProcess = subprocess.run(
+        ['systemctl', 'status', 'postgresql@16-main'],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True
+    )
 
     if 'active (running)' not in check_db.stdout:
         subprocess.run("sudo systemctl start postgresql", shell=True, check=True)
 
-    parser = argparse.ArgumentParser(description='Ex: python aavc6.py input.txt --vcf_mode --debug')
+    # parse command-line arguments
+    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+        description='Ex: python aavc.py input.txt --vcf_mode --debug'
+    )
 
     parser.add_argument('input', type=str, help='variant list (input.txt) or variant ID (12-106992962-T-G)')
     parser.add_argument('--debug', action='store_true', help='run the interpreter in debug mode')
@@ -2745,16 +2677,15 @@ if __name__ == "__main__":
     parser.add_argument('--predictor', choices=['bayesdel', 'revel'], help='missense prediction tool to use')
     parser.add_argument('--activate_PM2', action='store_true', help='consider low variant frequency as evidence towards pathogenicity')
 
-    # Parse the arguments
-    args = parser.parse_args()
-    
-    PM2 = False
-    if args.activate_PM2:
-        PM2 = True
+    args: argparse.Namespace = parser.parse_args()
+
+    PM2: bool = args.activate_PM2
+
+    run: Optional[AAVC] = None
 
     if args.activate_PM2:
         run = AAVC(clock=True, deactivate_PM2=PM2)
-    
+
     elif args.vcf_mode:
         run = AAVC(clock=True, deactivate_PM2=PM2, predictor=args.predictor)
         run.vcf_run(args.input)
@@ -2764,7 +2695,7 @@ if __name__ == "__main__":
         run.vcf_run(args.input, svcf_mode=True)
 
     else:
-
+        variant_list: List[str]
         if ".txt" in args.input:
             variant_list = pd.read_csv(args.input, sep="\t", header=None)[0].tolist()
         else:
@@ -2772,8 +2703,8 @@ if __name__ == "__main__":
 
         run = AAVC(variant_list, deactivate_PM2=PM2, clock=True)
         run.run()
-    
+
+    # close DB connection
     connection.close()
-'''
 
 
