@@ -41,7 +41,9 @@ This script (`aavc.py`) runs the AAVC on a list of variants or a single variant 
 python aavc.py input.txt
 ```
 
-**2. Process a single variant ID**
+**2. Process a single variant**
+
+Provide variant in the format `chr-pos-ref-alt` (e.g., `12-106992962-T-G`).
 
 ```bash
 python aavc.py 12-106992962-T-G
