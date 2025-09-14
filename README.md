@@ -10,13 +10,13 @@ AAVC is a computational framework for the clinical interpretation of genomic var
 
 ### Installation
 
-**1 Prerequisites
+**1. Prerequisites
 
 - Operating System: Ubuntu/Debian
 - Account with sudo privileges.
 - Internet connection.
 
-**2 Clone the repository
+**2. Clone the repository
 
 ```bash
 git clone https://github.com/ardainn/AAVC.git
@@ -24,7 +24,7 @@ cd AAVC
 ls -la
 ```
 
-**3 Run the installer
+**3. Run the installer
 
 ```bash
 ./install.sh
