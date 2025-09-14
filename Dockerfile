@@ -65,4 +65,5 @@ EXPOSE 5432
 CMD service postgresql start && \
     python3 write_tables.py && \
     psql -U ${POSTGRES_USER} -d ${POSTGRES_DB} -f indices.sql && \
-    python3 aavc6.py --help
+    python3 aavc.py --help
+
