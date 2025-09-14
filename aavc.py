@@ -26,7 +26,6 @@ db_url = 'postgresql://mark_antony:140183@localhost:5432/aavc'
 engine = create_engine(db_url, pool_size=200, max_overflow=0)
 connection = engine.connect()
 
-# redis_client = redis.Redis(host='localhost', port=6379, db=0)
 
 # this was adapted from StackExchange, fixes a ridiculous problem with SQL
 def addapt_numpy_float64(numpy_float64):
@@ -36,10 +35,8 @@ def addapt_numpy_float64(numpy_float64):
 def addapt_numpy_int64(numpy_int64):
     return AsIs(numpy_int64)
 
-
 register_adapter(numpy.float64, addapt_numpy_float64)
 register_adapter(numpy.int64, addapt_numpy_int64)
-
 
 class Query:
 
