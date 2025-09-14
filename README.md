@@ -4,7 +4,6 @@ AAVC is a computational framework for the clinical interpretation of genomic var
 ### Key Features
 - Implements ACMG/AMP guidelines and ClinGen refinements
 - Achieves 99.3% concordance with FDA-approved variant classifications
-- Outperforms existing tools (63.6% and 93.3% concordance)
 - Resolves ~50% of variants of uncertain significance (≈710,000 of 1.38M in ClinVar)
 - Supports population-scale curation (e.g., >300 novel variants identified in the Turkish Variome)
 - Highlights clinically actionable findings (1 in 15 individuals carried an actionable genotype)
