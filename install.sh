@@ -128,4 +128,4 @@ echo ""
 echo "Installation is done."
 echo ""
 
-python3 aavc6.py --help
+python3 aavc.py --help
