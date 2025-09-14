@@ -1,5 +1,5 @@
 ## AAVC: Automated ACMG-based Variant Classifier
-AAVC is a computational framework for the clinical interpretation of genomic variants based on the standards and guidelines of the American College of Medical Genetics and Genomics (ACMG) and ClinGen specifications. By integrating large-scale public databases and in silico prediction tools, AAVC provides a robust, automated solution for variant classification.
+AAVC is a computational framework for the clinical interpretation of genomic variants based on the standards and guidelines of the American College of Medical Genetics and Genomics (ACMG) and ClinGen specifications. By integrating large-scale public databases and _in silico_ prediction tools, AAVC provides a robust, automated solution for variant classification.
 
 ### Key Features
 - Implements ACMG/AMP guidelines and ClinGen refinements
@@ -13,7 +13,7 @@ AAVC is a computational framework for the clinical interpretation of genomic var
 **1. Prerequisites**
 
 - Operating System: Ubuntu/Debian
-- Account with sudo privileges
+- Account with `sudo` privileges
 - Internet connection
 
 **2. Clone the repository**
