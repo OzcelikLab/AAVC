@@ -1,0 +1,10 @@
+CREATE INDEX fnc_idx ON functional (chr, pos);
+CREATE INDEX clv_idx1 ON clinvar (chr, pos);
+CREATE INDEX clv_idx2 ON clinvar (enst_id);
+CREATE INDEX dom_idx ON domains (chr, strand, start_pos, end_pos);
+CREATE INDEX exn_idx ON exons (enst_id);
+CREATE INDEX gnm_idx ON gene_metrics (enst_id);
+CREATE INDEX hmp_idx ON homopolymers (chr, start_pos);
+CREATE INDEX rmc_idx ON regional_constraints (chr, start_pos);
+CREATE INDEX rep_idx ON repeats (chr, start_pos);
+CREATE INDEX vlt_idx ON vault (chr, pos);
