@@ -73,6 +73,6 @@ python aavc.py input.vcf --vcf_mode --keep_info
 
 ### Web Interface
 
-AAVC also provides a web-based interface running over Redis. You can submit variants through the web app.
+AAVC is also available through a web-based interface running on Redis, where variants identifiers can be submitted.
 
 Access the website: [aavc.bilkent.edu.tr](https://aavc.bilkent.edu.tr)
