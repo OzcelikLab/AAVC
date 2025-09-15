@@ -1,5 +1,4 @@
 #!/bin/bash
-set -euo pipefail
 
 #Variables
 DB_NAME="aavc"
