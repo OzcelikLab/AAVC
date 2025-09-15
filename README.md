@@ -35,6 +35,12 @@ sudo ./install.sh
 
 This script (`aavc.py`) runs the AAVC on a list of variants or a single variant ID. It can also process pre-annotated VCF files.
 
+Remember to activate the virtual environment before running AAVC:
+
+```bash
+source aavc_env/bin/activate
+```
+
 **1. Process a text file with variant IDs**
 
 `input.txt` should contain one variant per line in the format `chr-pos-ref-alt` (e.g., `12-106992962-T-G`).
