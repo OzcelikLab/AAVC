@@ -21,7 +21,8 @@ pd.set_option('mode.sim_interactive', True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # database connection string for PostgreSQL
-db_url = 'postgresql://aavc_user:aavc_pass@localhost:5432/aavc'
+with open("db_config.txt", "r") as f:
+    db_url = f.read().strip()
 
 # open a connection to the database
 engine = create_engine(db_url, pool_size=200, max_overflow=0)
