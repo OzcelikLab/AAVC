@@ -1,18 +1,18 @@
 #!/bin/bash
 set -euo pipefail
 
-# Variables
+#Variables
 DB_NAME="aavc"
 DB_USER="aavc_user"
 DB_PASS="aavc_pass"
 
-# Install R if missing
+#install R if missing
 if ! command -v Rscript &>/dev/null; then
     sudo apt update && sudo apt install -y r-base-core
     sudo Rscript -e "install.packages('data.table', repos='https://cran.rstudio.com/')"
 fi
 
-# Install PostgreSQL if missing
+#install PostgreSQL if missing
 if ! dpkg -l | grep -q "postgresql-16"; then
     sudo apt update
     sudo apt install -y gnupg2 wget curl
@@ -25,7 +25,7 @@ if ! dpkg -l | grep -q "postgresql-16"; then
     sudo systemctl enable --now postgresql
 fi
 
-# Create DB and user if missing
+#create DB and user if missing
 if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" | grep -q 1; then
     sudo -u postgres psql -c "CREATE DATABASE $DB_NAME;"
 fi
@@ -35,15 +35,16 @@ if ! sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$DB_USER'
     sudo -u postgres psql -c "ALTER DATABASE $DB_NAME OWNER TO $DB_USER;"
 fi
 
-# Get connection string
+#get connection string
 PORT=$(sudo -u postgres psql -tAc "SHOW port;")
 DB_URL="postgresql://$DB_USER:$DB_PASS@localhost:$PORT/$DB_NAME"
 echo "$DB_URL" > db_config.txt
 
-# Install Python + deps
+#install Python + deps
 sudo apt install -y python3 python3-pip python3-venv
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv aavc_env
+source aavc_env/bin/activate
+
 #install pandas
 echo "Installing pandas for Python..."
 pip3 install pandas
