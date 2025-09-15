@@ -28,9 +28,7 @@ git lfs pull
 **3. Run the installer**
 
 ```bash
-sudo snap install docker
-sudo docker build -t aavc:latest .
-sudo docker run -it --rm aavc:latest
+sudo ./install.sh
 ```
 
 ### Usage
