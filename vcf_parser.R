@@ -2,11 +2,9 @@ require(data.table)
 
 #use all threads
 setDTthreads(parallel::detectCores())
-#setDTthreads(64)
 
 #set directory as script path
 setwd(system("pwd", intern = T))
-#setwd("/media/ozcelik2/TO-11/aavc/")
 
 #parse arguments
 args <- commandArgs(trailingOnly = TRUE)
@@ -65,8 +63,6 @@ if (predictor == "") {stop("predictor is not defined. Please define the correspo
 
 #collect fields to be extracted
 field_names <- list(grpmax = grpmax, nhomalt = nhomalt, predictor = predictor, spliceai = spliceai, phylop = phylop)
-
-#vcf <- fread("/media/ozcelik2/TO-12/gnomAD4_4.1/protein_coding/csq/Obesity/try.txt", header=F, data.table=T, sep="\t")
 
 #read vcf and get unique columns
 vcf <- fread(vcf_dir, header=F, data.table=T, sep="\t")
