@@ -18,6 +18,7 @@ import urllib3
 # suppress pandas warnings about chained assignment operations and urllib3
 pd.options.mode.chained_assignment = None
 pd.set_option('mode.sim_interactive', True)
+pd.set_option('future.no_silent_downcasting', True)
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # database connection string for PostgreSQL
@@ -31,6 +32,7 @@ connection = engine.connect()
 # fix issues with inserting NumPy data into PostgreSQL
 register_adapter(numpy.float64, lambda x: AsIs(x))
 register_adapter(numpy.int64, lambda x: AsIs(x))
+
 
 class Query:
     """
@@ -203,33 +205,13 @@ class Query:
         ext = "/vep/homo_sapiens/region"
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
-        '''
-        cached_data = None
-        if self.cache is True:
-            if redis_client.get(ext):
-                cached_data = redis_client.get(ext)
-    
-        if cached_data:
-            decoded = json.loads(cached_data)
-            print("using cached data")
-        else:
-        '''
         attempts = 0
         # retry if connection lost or no response received
         while attempts < 16:
 
             print("retrieving via REST API")
             # select prioritization strategy
-            '''
-            if prioritization == "most_severe":
-                pick_order = ["rank", "canonical", "biotype", "ccds"]
-            elif prioritization == "canonical":
-                pick_order = ["canonical"]
-            elif prioritization == ["mane_select"]:
-                pick_order = ["mane_select"]
-            else:
-                pick_order = prioritization
-            '''
+
 
             if self.predictor == "revel":
                 pred_field = "REVEL_score"
@@ -246,15 +228,13 @@ class Query:
             if response.ok:
                 decoded = response.json()
 
-                '''
-                if self.cache is True:
-                    redis_client.setex(ext, 300, json.dumps(decoded).encode('utf-8'))
-                '''
-
                 break
 
+            elif response.status_code == 400:
+                raise Exception("Invalid input!")
             else:
                 attempts += 1
+                print(response)
                 print(f"{response} Could not establish connection with Ensembl. Retrying...")
                 time.sleep(attempts * 1.5)
 
@@ -272,16 +252,6 @@ class Query:
                 # select the prioritized variant effect
                 j = 0
 
-                '''
-                for tcpt_conseq in var["transcript_consequences"]:
-                    if "gene_symbol" in tcpt_conseq and "hgvsc" in tcpt_conseq:
-                        if ":c." in tcpt_conseq["hgvsc"]:
-                            break
-                    if j + 1 < len(var["transcript_consequences"]):
-                        j += 1
-                    else:
-                        break
-                '''
 
                 strand = var["transcript_consequences"][j]["strand"]
                 gene_id = var["transcript_consequences"][j]["gene_id"]
@@ -365,7 +335,6 @@ class Query:
                     '''
                     max_spl = max(DS_AG, DS_AL, DS_DG, DS_DL)
                 else:
-                    #DS_AG, DS_AL, DS_DG, DS_DL, DP_AG, DP_AL, DP_DG, DP_DL = None, None, None, None, None, None, None, None
                     max_spl = None
 
                 is_canonical = False
@@ -379,7 +348,6 @@ class Query:
                             "major_conseq": major_conseq, "all_conseqs": all_conseqs, "revel": revel,
                             "bayesdel": bayesdel, "spliceAI": max_spl, "phyloP100way": phyloP100way,
                             "is_canonical": is_canonical}
-                #'"sAI": {"DS_AG": DS_AG, "DS_AL": DS_AL, "DS_DG": DS_DG, "DS_DL": DS_DL, "DP_AG": DP_AG, "DP_AL": DP_AL, "DP_DG": DP_DG, "DP_DL": DP_DL},
 
                 print(var_data)
                 # if indel or non-vcf-string identifier used, adopt 1-based positions
@@ -820,7 +788,7 @@ class Variant:
                 contains_pathogenic = True
             for index, row in repeats.iterrows():
                 repeat_list.append(
-                    f"{row['rep_name'].squeeze()} ({row['rep_class'].squeeze()}) ({row['pat_vars'].squeeze()} P/LP)")
+                    f"{row['rep_name']} ({row['rep_class']}) ({row['pat_vars']} P/LP)")
 
         return {"within_repeat": within_repeat, "contains_pathogenic": contains_pathogenic, "repeat_desc": repeat_list}
 
@@ -893,6 +861,20 @@ class Variant:
 
             else:
                 return False
+
+    def is_blacklisted(self):
+
+        if self.strand == 1:
+            q_bl = text(''' SELECT * FROM blacklist WHERE chr = :chr AND :pos BETWEEN "start_pos" AND "end_pos"  ''')
+        else:
+            q_bl = text(''' SELECT * FROM blacklist WHERE chr = :chr AND :pos BETWEEN "end_pos" AND "start_pos"  ''')
+
+        blackrow = pd.read_sql_query(q_bl, connection, params={"pos": self.pos, "chr": self.chr})
+
+        if len(blackrow) > 0:
+            return True
+        else:
+            return False
 
     def check_NMD(self, splice_trunc_start=None):
 
@@ -1006,6 +988,22 @@ class Variant:
                 return domains
             else:
                 return None
+
+
+        if self.strand == 1:
+            q = text(
+                '''SELECT * FROM pext WHERE ensg_id = :gene_id AND chr = :chromosome AND :nt_pos BETWEEN start_pos AND end_pos''')
+        else:
+            q = text(
+                '''SELECT * FROM pext WHERE ensg_id = :gene_id AND chr = :chromosome AND :nt_pos BETWEEN end_pos AND start_pos''')
+
+        r = pd.read_sql_query(q, connection,
+                              params={"gene_id": self.gene_id, "chromosome": self.chr, "nt_pos": self.pos})
+        if len(r) > 0:
+            return r["mean_pext"].squeeze()
+
+        else:
+            return None
 
     def check_homopolymer(self):
 
@@ -1178,7 +1176,7 @@ class Variant:
 
     def get_func_class(self):
 
-        q = text(''' SELECT * FROM functional_tests WHERE chr = :chr AND pos = :pos AND ref = :ref AND alt = :alt''')
+        q = text(''' SELECT * FROM functional WHERE chr = :chr AND pos = :pos AND ref = :ref AND alt = :alt''')
 
         r = pd.read_sql_query(q, connection,
                               params={"chr": self.chr, "pos": self.pos, "ref": self.ref, "alt": self.alt})
@@ -1280,6 +1278,9 @@ class ACMG:
     Stores criteria evaluation, descriptions, flags, and final classification.
     """
 
+    known_risk_variants = ["3-165830741-T-C", "7-117509089-C-T", "1-169549811-C-T", "X-154536002-C-T",
+                            "9-36217448-C-T", "6-26090951-C-G", "6-26092913-G-A"]
+
     def __init__(self, variant: "Variant", predictor: Any) -> None:
         """
         Initialize ACMG classification object for a given variant.
@@ -1308,7 +1309,6 @@ class ACMG:
 
         # Final ACMG classification (Pathogenic, Likely Pathogenic, VUS, etc.)
         self.classification: Optional[str] = None
-
 
     def calc_ACMG_class(self):
 
@@ -1382,9 +1382,12 @@ class ACMG:
         self.PP3_BP4()
         # self.PP4()
         self.PP5_BP6()
-        self.BA1()
-        self.BS1()
-        self.BS2()
+        if self.variant.var_id not in ACMG.known_risk_variants:
+            self.BA1()
+            self.BS1()
+            self.BS2()
+        else:
+            self.flags.append("COMMON_KNOWN_RISK_VARIANT")
         # self.BS4()
         self.BP1()
         # self.BP2()
@@ -1438,6 +1441,8 @@ class ACMG:
 
     def BA1(self):
 
+        self.criteria["BA1"] = 0
+
         is_exception = False
 
         BA1_exceptions = {"ENSG00000244734": 0.05479,   #HBB
@@ -1453,11 +1458,8 @@ class ACMG:
             self.criteria["BA1"] = "BA1_A"
             self.flags.append("POLYMORPHISM")
 
-        if is_exception and self.criteria["BA1"] is not "BA1_A":
+        if is_exception and self.criteria["BA1"] != "BA1_A":
                 self.flags.append("BA1_EXCEPTION")
-
-        else:
-            self.criteria["BA1"] = 0
 
     def BS1(self):
 
@@ -1673,11 +1675,7 @@ class ACMG:
     # indel & stop-loss rules
 
     def PM4_BP3(self):
-        '''
-        if self.variant.is_blacklisted():
-            self.criteria["BP3"] = "BP3_A"
-            self.flags.append(f"BLACKLISTED")
-        '''
+
 
         if self.variant.major_conseq == "stop_lost":
             if self.variant.alt_stop != -1:
@@ -1917,7 +1915,7 @@ class ACMG:
 
                         if pat_vars / tot_vars > 0.5:
                             self.criteria["PVS1"] = "PVS1_S"
-                            self.flags.append("EXON_ENRICHED_FOR_P/LP_VARIANTS")
+                            self.flags.append("REMOVES_EXON_ENRICHED_FOR_P/LP_VARIANTS")
 
                         elif self.variant.check_regional_constraint():
 
@@ -1958,7 +1956,7 @@ class ACMG:
 
                                 perc_lost = 1 - (closest_aa / self.variant.prot_length)
 
-
+                                
 
                                 if perc_lost >= 0.1:
                                     self.criteria["PVS1"] = "PVS1_S"
@@ -2051,13 +2049,13 @@ class ACMG:
 
             if annotated_splicing[0] is not None:
                 spl_csq, is_frameshifting, undergoes_NMD, perc_lost, trunc_start, trunc_end, exons_skipped = annotated_splicing
-
+		
                 #print(f"percentage lost: {round(perc_lost,2)*100}%")
-
+		
                 if is_frameshifting is True:
 
                     if spl_csq == "STOPGAINED":
-                        self.flags.append("RETAINED_INFRAME_INTRONIC_SEQ_W_STOP_CODON")
+                        self.flags.append("RETAINED_INTRON_W_STOP_CODON")
                         self.flags.append("INFRAME")
 
                         self.variant.all_conseqs.append("stop_gained")
@@ -2066,7 +2064,7 @@ class ACMG:
 
                     if undergoes_NMD:
                         self.flags.append("UNDERGOES_NMD")
-                        self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                        #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                         self.criteria["PVS1"] = "PVS1_VS-"
                     else:
                         self.flags.append("ESCAPES_NMD")
@@ -2079,18 +2077,18 @@ class ACMG:
 
                         if pat_vars / tot_vars > 0.5:
                             self.criteria["PVS1"] = "PVS1_S-"
-                            self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                            #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                             self.flags.append("EXON_ENRICHED_FOR_P/LP_VARIANTS")
 
                         elif self.variant.check_regional_constraint(trunc_start, trunc_end):
 
                             self.criteria["PVS1"] = "PVS1_S-"
-                            self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                            #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                             self.flags.append("CONSTRAINED_REGION")
 
                         elif self.variant.check_domains(extent="range", query_start=trunc_start, query_end=trunc_end):
                             self.criteria["PVS1"] = "PVS1_S-"
-                            self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                            #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                             self.flags.append("ALTERS_FUNCTIONAL_DOMAIN")
 
                         else:
@@ -2108,7 +2106,7 @@ class ACMG:
 
                                 if perc_lost >= 0.1:
                                     self.criteria["PVS1"] = "PVS1_S-"
-                                    self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                                    #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                                     self.flags.append("AT_LEAST_10%_OF_PROTEIN_LOST")
 
                                 else:
@@ -2140,19 +2138,19 @@ class ACMG:
 
                     if self.variant.check_domains(extent="range", query_start=trunc_start, query_end=trunc_end):
                         self.criteria["PVS1"] = "PVS1_S-"
-                        self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                        #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                         self.flags.append("ALTERS_FUNCTIONAL_DOMAIN")
 
                     elif pat_vars / tot_vars > 0.5:
 
                         self.criteria["PVS1"] = "PVS1_S-"
-                        self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                        #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                         self.flags.append("EXON_ENRICHED_FOR_P/LP_VARIANTS")
 
                     elif self.variant.check_regional_constraint(trunc_start, trunc_end):
 
                         self.criteria["PVS1"] = "PVS1_S-"
-                        self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                        #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                         self.flags.append("CONSTRAINED_REGION")
 
                     else:
@@ -2170,7 +2168,7 @@ class ACMG:
 
                             if perc_lost >= 0.1:
                                 self.criteria["PVS1"] = "PVS1_S-"
-                                self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
+                                #self.flags.append("COULD_BE_RESCUED_BY_ALTERNATIVE_SPLICING")
                                 self.flags.append("AT_LEAST_10%_OF_PROTEIN_LOST")
                             else:
                                 self.flags.append("LESS_THAN_10%_OF_PROTEIN_LOST")
@@ -2635,7 +2633,6 @@ class AAVC:
         result = subprocess.run(['wc', '-l', self.variants], capture_output=True, text=True)
         line_count = int(result.stdout.split()[0])
         return line_count
-
 
 # uncomment below to run AAVC in Python interpreter
 
