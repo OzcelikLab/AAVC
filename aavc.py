@@ -2656,7 +2656,7 @@ run.run()
 
 if __name__ == "__main__":
     # check PostgreSQL status
-    check_db: subprocess.CompletedProcess = subprocess.run(
+    check_db = subprocess.run(
         ['systemctl', 'status', 'postgresql@16-main'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -2667,7 +2667,7 @@ if __name__ == "__main__":
         subprocess.run("sudo systemctl start postgresql", shell=True, check=True)
 
     # parse command-line arguments
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description='Ex: python aavc.py input.txt --vcf_mode --debug'
     )
 
@@ -2677,35 +2677,31 @@ if __name__ == "__main__":
     parser.add_argument('--svcf_mode', action='store_true', help='process a pre-calculated sVCF file')
     parser.add_argument('--keep_info', action='store_true', help='keep the INFO column if the input is VCF')
     parser.add_argument('--predictor', choices=['bayesdel', 'revel'], help='missense prediction tool to use')
-    parser.add_argument('--activate_PM2', action='store_true', help='consider low variant frequency as evidence towards pathogenicity')
-    parser.add_argument('--deactivate_PP5_BP6', action='store_true', help='disable reputable source criteria')
+    parser.add_argument('--activate_PM2', action='store_true', help='activate rare variant criteria')
+    parser.add_argument('--activate_PP5_BP6', action='store_true', help='activate reputable source criteria')
 
-    args: argparse.Namespace = parser.parse_args()
+    args = parser.parse_args()
 
-    PM2: bool = args.activate_PM2
-    PP5_BP6: bool = args.deactivate_PP5_BP6
+    PM2 = args.activate_PM2
+    PP5_BP6 = args.activate_PP5_BP6
 
-    run: Optional[AAVC] = None
+    run = None
 
-    if args.activate_PM2:
-        run = AAVC(clock=True, deactivate_PM2=PM2, deactivate_PP5_BP6=PP5_BP6)
-
-    elif args.vcf_mode:
-        run = AAVC(clock=True, deactivate_PM2=PM2, deactivate_PP5_BP6=PP5_BP6, predictor=args.predictor)
+    if args.vcf_mode:
+        run = AAVC(clock=True, deactivate_PM2=not PM2, deactivate_PP5_BP6=not PP5_BP6, predictor=args.predictor)
         run.vcf_run(args.input)
 
     elif args.svcf_mode:
-        run = AAVC(clock=True, deactivate_PM2=PM2, deactivate_PP5_BP6=PP5_BP6, predictor=args.predictor)
+        run = AAVC(clock=True, deactivate_PM2=not PM2, deactivate_PP5_BP6=not PP5_BP6, predictor=args.predictor)
         run.vcf_run(args.input, svcf_mode=True)
 
     else:
-        variant_list: List[str]
         if ".txt" in args.input:
             variant_list = pd.read_csv(args.input, sep="\t", header=None)[0].tolist()
         else:
             variant_list = [args.input]
 
-        run = AAVC(variant_list, deactivate_PM2=PM2, deactivate_PP5_BP6=PP5_BP6, clock=True)
+        run = AAVC(variant_list, deactivate_PM2=not PM2, deactivate_PP5_BP6=not PP5_BP6, clock=True)
         run.run()
 
     # close DB connection
