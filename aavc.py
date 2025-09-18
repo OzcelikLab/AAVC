@@ -1310,7 +1310,7 @@ class ACMG:
         # Final ACMG classification (Pathogenic, Likely Pathogenic, VUS, etc.)
         self.classification: Optional[str] = None
 
-    def calc_ACMG_class(self):
+    def calc_ACMG_class(self, deactivated_criteria = None):
 
         criteria_met = []
         odds_path = 1
@@ -1322,7 +1322,7 @@ class ACMG:
         total_point = 0
 
         for crit, assn in self.criteria.items():
-            if assn is not None and assn != 0:
+            if (deactivated_criteria is None or crit not in deactivated_criteria) and (assn is not None) and (assn != 0):
 
                 criteria_met.append(assn)
 
@@ -1366,13 +1366,21 @@ class ACMG:
 
     def classify(self, PS4=None, deactivate_PM2=False, deactivate_PP5_BP6=False):
 
+        deactivated_criteria = []
+
+        if deactivate_PM2:
+            deactivated_criteria.append("PM2")
+
+        if deactivate_PP5_BP6:
+            deactivated_criteria.append("PP5")
+            deactivated_criteria.append("BP6")
+
         self.PS1()
         self.PS2()
         self.PS3_BS3()
         # self.PS4()
         self.PM1()
-        if not deactivate_PM2:
-            self.PM2()
+        self.PM2()
         self.PM3()
         self.PM4_BP3()
         self.PM5()
@@ -1381,8 +1389,7 @@ class ACMG:
         self.PP2()
         self.PP3_BP4()
         # self.PP4()
-        if not deactivate_PP5_BP6:
-            self.PP5_BP6()
+        self.PP5_BP6()
         if self.variant.var_id not in ACMG.known_risk_variants:
             self.BA1()
             self.BS1()
@@ -1404,7 +1411,7 @@ class ACMG:
         else:
             self.criteria["PS4"] = None
 
-        self.calc_ACMG_class()
+        self.calc_ACMG_class(deactivated_criteria)
 
     # pop freq rules
 
