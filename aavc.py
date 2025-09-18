@@ -2603,7 +2603,7 @@ class AAVC:
 
                     vua = Variant(var, var_data, {"popmax": popmax, "total_hom_ac": total_hom_ac},
                                   predictor=self.predictor)
-                    vua.classify(PS4)
+                    vua.classify(PS4, self.deactivate_PM2, self.deactivate_PP5_BP6)
                     print("\n")
                     print(f"\033[1mvariant: {var} ({vua.gene}:{vua.nt_change}) \033[1;97m<<{vua.ACMG_classification}>>\033[0m")
                     print(vua.ACMG_criteria)
