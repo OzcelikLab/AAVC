@@ -28,7 +28,7 @@ git lfs pull
 **3. Run the installer**
 
 ```bash
-sudo ./install.sh
+sudo bash ./install.sh
 ```
 
 ### Usage
