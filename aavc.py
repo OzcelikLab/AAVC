@@ -1705,8 +1705,8 @@ class ACMG:
                 else:
                     self.criteria["PM4"] = "PM4_M"
                     self.flags.append("CRITICAL_REPEAT")
-			else:
-				self.criteria["PM4"] = "PM4_M"
+        	else:
+                self.criteria["PM4"] = "PM4_M"
                 self.flags.append("PROTEIN_LENGTH_CHANGES_IN_NON-REPEAT_REGION")	
         else:
             self.criteria["PM4"] = 0
