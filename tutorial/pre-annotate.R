@@ -6,7 +6,7 @@ require(R.utils)
 setwd("/path/to/your/directory/")
 
 #pre_annotation_db
-database_path <- "/path/to/the/pre_annotation_db/"
+database_path <- "/path/to/the/pre-annotation_db/"
 
 #Ensembl VEP directories
 vep_directory <- "/path/to/the/ensembl/vep" # "usually ends with /ensembl/ensembl-vep/vep"
