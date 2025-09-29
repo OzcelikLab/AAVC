@@ -920,10 +920,10 @@ class Variant:
         else:
             return False
 
-    def classify(self, PS4, deactivate_PM2):
+    def classify(self, PS4, deactivate_PM2, deactivate_PP5_BP6):
 
         new_assessment = ACMG(self, predictor=self.predictor)
-        new_assessment.classify(PS4, deactivate_PM2)
+        new_assessment.classify(PS4, deactivate_PM2, deactivate_PP5_BP6)
 
     def check_domains(self, extent="variant", query_start=None, query_end=None):
 
@@ -1310,7 +1310,7 @@ class ACMG:
         # Final ACMG classification (Pathogenic, Likely Pathogenic, VUS, etc.)
         self.classification: Optional[str] = None
 
-    def calc_ACMG_class(self):
+    def calc_ACMG_class(self, deactivated_criteria = None):
 
         criteria_met = []
         odds_path = 1
@@ -1322,7 +1322,7 @@ class ACMG:
         total_point = 0
 
         for crit, assn in self.criteria.items():
-            if assn is not None and assn != 0:
+            if (deactivated_criteria is None or crit not in deactivated_criteria) and (assn is not None) and (assn != 0):
 
                 criteria_met.append(assn)
 
@@ -1364,15 +1364,23 @@ class ACMG:
         self.variant.ACMG_score = total_point
         self.variant.post_prob = f"{round(post_prob*100,2)}%"
 
-    def classify(self, PS4=None, deactivate_PM2=False):
+    def classify(self, PS4=None, deactivate_PM2=False, deactivate_PP5_BP6=False):
+
+        deactivated_criteria = []
+
+        if deactivate_PM2:
+            deactivated_criteria.append("PM2")
+
+        if deactivate_PP5_BP6:
+            deactivated_criteria.append("PP5")
+            deactivated_criteria.append("BP6")
 
         self.PS1()
         self.PS2()
         self.PS3_BS3()
         # self.PS4()
         self.PM1()
-        if not deactivate_PM2:
-            self.PM2()
+        self.PM2()
         self.PM3()
         self.PM4_BP3()
         self.PM5()
@@ -1403,7 +1411,7 @@ class ACMG:
         else:
             self.criteria["PS4"] = None
 
-        self.calc_ACMG_class()
+        self.calc_ACMG_class(deactivated_criteria)
 
     # pop freq rules
 
@@ -1697,6 +1705,9 @@ class ACMG:
                 else:
                     self.criteria["PM4"] = "PM4_M"
                     self.flags.append("CRITICAL_REPEAT")
+            else:
+                self.criteria["PM4"] = "PM4_M"
+                self.flags.append("PROTEIN_LENGTH_CHANGES_IN_NON-REPEAT_REGION")	
         else:
             self.criteria["PM4"] = 0
 
@@ -2336,7 +2347,8 @@ class AAVC:
                  cache: bool = False,
                  prioritization: str = "canonical",
                  predictor: str = "bayesdel",
-                 deactivate_PM2: bool = False) -> None:
+                 deactivate_PM2: bool = False,
+                 deactivate_PP5_BP6: bool = False) -> None:
         """
         Initialize AAVC object.
 
@@ -2347,8 +2359,9 @@ class AAVC:
             debug (bool, optional): Enable debug mode. Defaults to False.
             cache (bool, optional): Enable caching of intermediate results. Defaults to False.
             prioritization (str, optional): Variant prioritization strategy. Defaults to "canonical".
-            predictor (str, optional): Predictor type (e.g., "bayesdel"). Defaults to "bayesdel".
-            deactivate_PM2 (bool, optional): Option to deactivate PM2 ACMG criterion. Defaults to False.
+            predictor (str, optional): Predictor type ("bayesdel" or "revel"). Defaults to "bayesdel".
+            deactivate_PM2 (bool, optional): Option to deactivate PM2 criterion. Defaults to False.
+            deactivate_PP5_BP6 (bool, optional): Option to deactivate PP5/BP6 criteria. Defaults to False.
         """
         self.variants: List[str] = variants if variants else []
         self.output: Dict[str, Any] = {}
@@ -2360,13 +2373,14 @@ class AAVC:
         self.prioritization: str = prioritization
         self.predictor: str = predictor
         self.deactivate_PM2: bool = deactivate_PM2
+        self.deactivate_PP5_BP6: bool = deactivate_PP5_BP6
         self.raised_exception: bool = False
         self.exception_statement: str = ""
 
     def process(self, variant):
 
         try:
-            variant.classify(self.mode, self.deactivate_PM2)
+            variant.classify(self.mode, self.deactivate_PM2, self.deactivate_PP5_BP6)
 
             print(f"\033[1mvariant: {variant.var_id} ({variant.gene}:{variant.nt_change}) ({variant.post_prob}) \033[1;97m<<{variant.ACMG_classification}>>\033[0m")
             print(variant.ACMG_criteria)
@@ -2589,7 +2603,7 @@ class AAVC:
 
                     vua = Variant(var, var_data, {"popmax": popmax, "total_hom_ac": total_hom_ac},
                                   predictor=self.predictor)
-                    vua.classify(PS4)
+                    vua.classify(PS4, self.deactivate_PM2, self.deactivate_PP5_BP6)
                     print("\n")
                     print(f"\033[1mvariant: {var} ({vua.gene}:{vua.nt_change}) \033[1;97m<<{vua.ACMG_classification}>>\033[0m")
                     print(vua.ACMG_criteria)
@@ -2652,7 +2666,7 @@ run.run()
 
 if __name__ == "__main__":
     # check PostgreSQL status
-    check_db: subprocess.CompletedProcess = subprocess.run(
+    check_db = subprocess.run(
         ['systemctl', 'status', 'postgresql@16-main'],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
@@ -2663,7 +2677,7 @@ if __name__ == "__main__":
         subprocess.run("sudo systemctl start postgresql", shell=True, check=True)
 
     # parse command-line arguments
-    parser: argparse.ArgumentParser = argparse.ArgumentParser(
+    parser = argparse.ArgumentParser(
         description='Ex: python aavc.py input.txt --vcf_mode --debug'
     )
 
@@ -2673,33 +2687,31 @@ if __name__ == "__main__":
     parser.add_argument('--svcf_mode', action='store_true', help='process a pre-calculated sVCF file')
     parser.add_argument('--keep_info', action='store_true', help='keep the INFO column if the input is VCF')
     parser.add_argument('--predictor', choices=['bayesdel', 'revel'], help='missense prediction tool to use')
-    parser.add_argument('--activate_PM2', action='store_true', help='consider low variant frequency as evidence towards pathogenicity')
+    parser.add_argument('--activate_PM2', action='store_true', help='activate rare variant criteria')
+    parser.add_argument('--activate_PP5_BP6', action='store_true', help='activate reputable source criteria')
 
-    args: argparse.Namespace = parser.parse_args()
+    args = parser.parse_args()
 
-    PM2: bool = args.activate_PM2
+    PM2 = args.activate_PM2
+    PP5_BP6 = args.activate_PP5_BP6
 
-    run: Optional[AAVC] = None
+    run = None
 
-    if args.activate_PM2:
-        run = AAVC(clock=True, deactivate_PM2=PM2)
-
-    elif args.vcf_mode:
-        run = AAVC(clock=True, deactivate_PM2=PM2, predictor=args.predictor)
+    if args.vcf_mode:
+        run = AAVC(clock=True, deactivate_PM2=not PM2, deactivate_PP5_BP6=not PP5_BP6, predictor=args.predictor)
         run.vcf_run(args.input)
 
     elif args.svcf_mode:
-        run = AAVC(clock=True, deactivate_PM2=PM2, predictor=args.predictor)
+        run = AAVC(clock=True, deactivate_PM2=not PM2, deactivate_PP5_BP6=not PP5_BP6, predictor=args.predictor)
         run.vcf_run(args.input, svcf_mode=True)
 
     else:
-        variant_list: List[str]
         if ".txt" in args.input:
             variant_list = pd.read_csv(args.input, sep="\t", header=None)[0].tolist()
         else:
             variant_list = [args.input]
 
-        run = AAVC(variant_list, deactivate_PM2=PM2, clock=True)
+        run = AAVC(variant_list, deactivate_PM2=not PM2, deactivate_PP5_BP6=not PP5_BP6, clock=True)
         run.run()
 
     # close DB connection
