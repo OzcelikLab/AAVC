@@ -1,3 +1,1 @@
-*.txt filter=lfs diff=lfs merge=lfs -text
-db_config.txt filter=lfs diff=lfs merge=lfs -text
-db/exons.txt filter=lfs diff=lfs merge=lfs -text
+* text=auto
