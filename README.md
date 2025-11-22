@@ -14,7 +14,7 @@ AAVC is a computational framework for the clinical interpretation of genomic var
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git git-lfs
+sudo apt-get install -y git
 ```
 
 **2. Clone the repository**
@@ -22,10 +22,17 @@ sudo apt-get install -y git git-lfs
 ```bash
 git clone https://github.com/OzcelikLab/AAVC.git
 cd AAVC
-git lfs pull
 ```
 
-**3. Run the installer**
+**3. Download the databases**
+
+```bash
+wget "https://zenodo.org/records/17674475/files/AAVC_db.zip?download=1" -O AAVC_db.zip
+mkdir -p db
+unzip AAVC_db.zip -d db/
+```
+
+**4. Run the installer**
 
 ```bash
 sudo bash ./install.sh
