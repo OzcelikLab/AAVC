@@ -108,7 +108,13 @@ class Query:
 
             elif self.input_type in ["hgvs_ensembl", "hgvs_refseq"]:
 
-                # omit version number, vep cannot read them
+                # remove protein-level part
+                self.variants[i] = re.sub(r'\s*\(p\.[^)]+\)', '', self.variants[i])
+
+                # remove gene symbol in parentheses after transcript
+                self.variants[i] = re.sub(r'(NM_\d+\.\d+)\([^)]*\)', r'\1', self.variants[i])
+
+                # omit transcript version for VEP
                 self.variants[i] = re.sub(r'\.\d+:', ':', self.variants[i])
 
     @staticmethod
