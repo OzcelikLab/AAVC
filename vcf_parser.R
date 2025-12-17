@@ -66,7 +66,7 @@ field_names <- list(grpmax = grpmax, nhomalt = nhomalt, predictor = predictor, s
 
 #read vcf and get unique columns
 vcf <- fread(vcf_dir, header=F, data.table=T, sep="\t")
-vcf <- unique(vcf, by = c("V1", "V2", "V4", "V5"))
+#vcf <- unique(vcf, by = c("V1", "V2", "V4", "V5"))
 
 #fix chromosome names
 if (grepl("chr",vcf[5,1])) {vcf[, V1 := substr(V1,4,nchar(V1))]}
